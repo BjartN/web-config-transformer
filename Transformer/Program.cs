@@ -1,6 +1,7 @@
 ﻿using Microsoft.Web.XmlTransform;
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -11,22 +12,27 @@ namespace Transformer
     {
         static void Main(string[] args)
         {
-            var targetFolder = @"c:\temp\transformed";
-            var folder = @"C:\dev\folder-with-web-config-and-transform-files";
-            var webConfig = Path.Combine(folder, "web.config");
+            var workingFolder = ConfigurationManager.AppSettings["workingFolder"];
+            var sourceFolder = ConfigurationManager.AppSettings["sourceFolder"];
+            var targetFile = ConfigurationManager.AppSettings["targetFile"];
 
-            var files = Directory.GetFiles(folder, "web*.config")
+            var webConfig = Path.Combine(sourceFolder, "web.config");
+            var defaults = ReadAppsettings(webConfig);
+
+            var files = Directory.GetFiles(sourceFolder, "web*.config")
                 .Where(x => new FileInfo(x).Name.ToLower() != "web.config");
 
             foreach (var transform in files)
             {
                 var fi = new FileInfo(transform);
-                Transformer.TransformConfig(webConfig, transform, Path.Combine(targetFolder, fi.Name));
+                Transformer.TransformConfig(webConfig, transform, Path.Combine(workingFolder, fi.Name));
             }
 
             var clientSettings = new Dictionary<string, IDictionary<string, string>>();
+            clientSettings["default"] = defaults;
+
             var clients = new List<string>();
-            foreach (var f in Directory.GetFiles(targetFolder, "*.config"))
+            foreach (var f in Directory.GetFiles(workingFolder, "*.config"))
             {
                 var client = new FileInfo(f).Name.ToLower()
                     .Replace("web.", "")
@@ -38,20 +44,30 @@ namespace Transformer
                 clientSettings[client] = dic;
             }
 
-            var allSettings = clientSettings.SelectMany(x => x.Value.Select(y => y.Key)).Distinct();
+
+            var allSettings = clientSettings.SelectMany(x => x.Value.Select(y => y.Key))
+                .Distinct()
+                .OrderBy(x => x);
 
             var separator = ",";
-            var header = separator + string.Join(separator, clients);
+            var header = separator + "default," + string.Join(separator, clients);
 
             var csv = header + Environment.NewLine;
             foreach (var setting in allSettings)
             {
                 var row = setting + separator;
-                foreach (var client in clients)
+                foreach (var clientSetting in clientSettings)
                 {
-                    if (clientSettings[client].ContainsKey(setting))
+                    if (clientSetting.Value.ContainsKey(setting))
                     {
-                        var value = clientSettings[client][setting];
+                        var value = clientSetting.Value[setting];
+
+                        var isDefaultValue = clientSetting.Key != "default" && defaults.ContainsKey(setting) && defaults[setting] == value;
+                        if (isDefaultValue)
+                        {
+                            value = "{default}";
+                        }
+
                         //if (value.Contains(separator))
                         //{
                         //    throw new Exception();
@@ -70,7 +86,7 @@ namespace Transformer
 
             Console.WriteLine(csv);
 
-            File.WriteAllText(@"c:\temp\foo.csv", csv);
+            File.WriteAllText(targetFile, csv);
         }
 
         private static IDictionary<string, string> ReadAppsettings(string file)
