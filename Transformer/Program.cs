@@ -12,6 +12,7 @@ namespace Transformer
     {
         static void Main(string[] args)
         {
+            var defaultName = "{default}";
             var workingFolder = ConfigurationManager.AppSettings["workingFolder"];
             var sourceFolder = ConfigurationManager.AppSettings["sourceFolder"];
             var targetFile = ConfigurationManager.AppSettings["targetFile"];
@@ -44,14 +45,15 @@ namespace Transformer
                 clientSettings[client] = dic;
             }
 
-
             var allSettings = clientSettings.SelectMany(x => x.Value.Select(y => y.Key))
                 .Distinct()
-                .OrderBy(x => x);
+                .OrderBy(x => x)
+                .ToArray();
+
+            //RemoveSettingWhenAllSameAsDefault(allSettings, defaults, clientSettings);
 
             var separator = ",";
             var header = separator + "default," + string.Join(separator, clients);
-
             var csv = header + Environment.NewLine;
             foreach (var setting in allSettings)
             {
@@ -65,13 +67,8 @@ namespace Transformer
                         var isDefaultValue = clientSetting.Key != "default" && defaults.ContainsKey(setting) && defaults[setting] == value;
                         if (isDefaultValue)
                         {
-                            value = "{default}";
+                            value = defaultName;
                         }
-
-                        //if (value.Contains(separator))
-                        //{
-                        //    throw new Exception();
-                        //}
 
                         row += "\"" + value.Replace("\"", "\"\"") + "\"" + separator;
                     }
@@ -87,6 +84,36 @@ namespace Transformer
             Console.WriteLine(csv);
 
             File.WriteAllText(targetFile, csv);
+        }
+
+        private static void RemoveSettingWhenAllSameAsDefault(
+            string[] allSettings,
+            IDictionary<string, string> defaults,
+            IDictionary<string, IDictionary<string, string>> clientSettings)
+        {
+            var settingsToRemove = new List<string>();
+            foreach (var setting in allSettings)
+            {
+                if (!defaults.ContainsKey(setting))
+                    continue;
+
+                var defaultValue = defaults[setting];
+                if (clientSettings.All(x => x.Value.ContainsKey(setting) && x.Value[setting] == defaultValue))
+                {
+                    settingsToRemove.Add(setting);
+                }
+            }
+
+            foreach (var s in settingsToRemove)
+            {
+                foreach (var d in clientSettings)
+                {
+                    if (d.Value.ContainsKey(s))
+                    {
+                        d.Value.Remove(s);
+                    }
+                }
+            }
         }
 
         private static IDictionary<string, string> ReadAppsettings(string file)
